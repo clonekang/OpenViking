@@ -33,6 +33,7 @@ class NvidiaRerankClient(RerankBase):
         api_key: str,
         model_name: str,
         provider: str = "nvidia",
+        api_base: Optional[str] = None,
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> None:
         """
@@ -42,6 +43,7 @@ class NvidiaRerankClient(RerankBase):
             api_key: NVIDIA API key (nvapi-...)
             model_name: Model name like "nvidia/llama-nemotron-rerank-1b-v2"
             provider: Provider name for metrics (default: "nvidia")
+            api_base: Full endpoint URL (configurable via config, falls back to NVIDIA default)
             extra_headers: Optional extra headers for API requests
         """
         super().__init__()
@@ -58,7 +60,11 @@ class NvidiaRerankClient(RerankBase):
             self._provider = "nvidia"
             self._model_id = model_name
 
-        self.api_base = f"https://ai.api.nvidia.com/v1/retrieval/{self._provider}/{self._model_id}/reranking"
+        # Use configured api_base if provided, otherwise build from provider/model
+        if api_base is not None:
+            self.api_base = api_base
+        else:
+            self.api_base = f"https://ai.api.nvidia.com/v1/retrieval/{self._provider}/{self._model_id}/reranking"
 
     def rerank_batch(self, query: str, documents: List[str]) -> Optional[List[float]]:
         """
@@ -167,5 +173,6 @@ class NvidiaRerankClient(RerankBase):
             api_key=config.api_key,
             model_name=model_name,
             provider=provider,
+            api_base=config.api_base,
             extra_headers=config.extra_headers,
         )
