@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class RerankConfig(BaseModel):
-    """Configuration for rerank API. Supports VikingDB, Cohere, OpenAI-compatible, and LiteLLM providers."""
+    """Configuration for rerank API. Supports VikingDB, Cohere, OpenAI-compatible, LiteLLM, and NVIDIA providers."""
 
     provider: Optional[str] = Field(
         default=None,
-        description="Rerank provider: 'vikingdb', 'cohere', 'openai', or 'litellm'. Auto-detected from config if omitted.",
+        description="Rerank provider: 'vikingdb', 'cohere', 'openai', 'litellm', or 'nvidia'. Auto-detected from config if omitted.",
     )
 
     # VikingDB fields
@@ -46,6 +46,9 @@ class RerankConfig(BaseModel):
         """Auto-detect provider from config fields when not explicitly set."""
         if self.provider:
             return self.provider.lower()
+        # Auto-detect nvidia from model name (e.g., "nvidia/llama-nemotron-rerank-1b-v2")
+        if self.model and self.model.startswith("nvidia/"):
+            return "nvidia"
         if self.api_key and self.api_base:
             return "openai"
         if self.api_key:
@@ -57,9 +60,9 @@ class RerankConfig(BaseModel):
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "RerankConfig":
         provider = self._effective_provider()
-        if provider and provider not in ["vikingdb", "cohere", "openai", "litellm"]:
+        if provider and provider not in ["vikingdb", "cohere", "openai", "litellm", "nvidia"]:
             raise ValueError(
-                f"Rerank provider must be one of ['vikingdb', 'cohere', 'openai', 'litellm'], got '{provider}'"
+                f"Rerank provider must be one of ['vikingdb', 'cohere', 'openai', 'litellm', 'nvidia'], got '{provider}'"
             )
         if provider == "openai":
             if not self.api_key or not self.api_base:
@@ -69,6 +72,11 @@ class RerankConfig(BaseModel):
         if provider == "litellm":
             if not self.model:
                 raise ValueError("LiteLLM rerank provider requires 'model'")
+        if provider == "nvidia":
+            if not self.api_key or not self.model:
+                raise ValueError(
+                    "NVIDIA rerank provider requires 'api_key' and 'model' (e.g., 'nvidia/llama-nemotron-rerank-1b-v2')"
+                )
         return self
 
     def is_available(self) -> bool:
@@ -80,6 +88,8 @@ class RerankConfig(BaseModel):
             return self.api_key is not None and self.api_base is not None
         if p == "litellm":
             return self.model is not None
+        if p == "nvidia":
+            return self.api_key is not None and self.model is not None
         if p == "vikingdb":
             return self.ak is not None and self.sk is not None
         return False

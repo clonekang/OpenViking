@@ -188,6 +188,11 @@ class RerankClient(RerankBase):
 
             return OpenAIRerankClient.from_config(config)
 
+        if provider == "nvidia":
+            from openviking.models.rerank.nvidia_rerank import NvidiaRerankClient
+
+            return NvidiaRerankClient.from_config(config)
+
         return cls(
             ak=config.ak,
             sk=config.sk,
