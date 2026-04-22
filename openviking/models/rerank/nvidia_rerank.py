@@ -35,6 +35,7 @@ class NvidiaRerankClient(RerankBase):
         provider: str = "nvidia",
         api_base: Optional[str] = None,
         extra_headers: Optional[Dict[str, str]] = None,
+        threshold: float = 0.0,
     ) -> None:
         """
         Initialize NVIDIA rerank client.
@@ -45,12 +46,14 @@ class NvidiaRerankClient(RerankBase):
             provider: Provider name for metrics (default: "nvidia")
             api_base: Full endpoint URL (configurable via config, falls back to NVIDIA default)
             extra_headers: Optional extra headers for API requests
+            threshold: Score threshold (0.0-1.0); results below this are filtered (default: 0.0)
         """
         super().__init__()
         self.api_key = api_key
         self.model_name = model_name
         self.provider = provider
         self.extra_headers = extra_headers or {}
+        self.threshold = threshold
 
         # Parse model name to build API endpoint
         # Format: provider/model-id -> e.g., "nvidia/llama-nemotron-rerank-1b-v2"
@@ -144,6 +147,19 @@ class NvidiaRerankClient(RerankBase):
                 # Use logit directly as score (higher = more relevant)
                 scores[idx] = item.get("logit", 0.0)
 
+            # Apply threshold filtering: set scores below threshold to 0
+            if self.threshold > 0.0:
+                filtered_scores = []
+                for score in scores:
+                    if score >= self.threshold:
+                        filtered_scores.append(score)
+                    else:
+                        filtered_scores.append(0.0)
+                        logger.debug(
+                            f"[NvidiaRerankClient] Filtered score {score:.4f} below threshold {self.threshold}"
+                        )
+                scores = filtered_scores
+
             logger.debug(f"[NvidiaRerankClient] Reranked {len(documents)} documents")
             return scores
 
@@ -175,4 +191,5 @@ class NvidiaRerankClient(RerankBase):
             provider=provider,
             api_base=config.api_base,
             extra_headers=config.extra_headers,
+            threshold=config.threshold,
         )

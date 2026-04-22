@@ -19,7 +19,7 @@ class LiteLLMRerankClient(RerankBase):
     LiteLLM rerank API client.
     """
 
-    def __init__(self, api_key: Optional[str], api_base: Optional[str], model_name: str):
+    def __init__(self, api_key: Optional[str], api_base: Optional[str], model_name: str, threshold: float = 0.0):
         """
         Initialize LiteLLM rerank client.
 
@@ -27,12 +27,14 @@ class LiteLLMRerankClient(RerankBase):
             api_key: API key for LiteLLM providers (optional, can come from env)
             api_base: API base for LiteLLM providers (optional, can come from env)
             model_name: Model name to use for reranking
+            threshold: Score threshold (0.0-1.0); results below this are filtered (default: 0.0)
         """
         super().__init__()
         self.api_key = api_key
         self.api_base = api_base
         self.model_name = model_name
         self.provider = "litellm"
+        self.threshold = threshold
 
     def rerank_batch(self, query: str, documents: List[str]) -> Optional[List[float]]:
         """
@@ -97,6 +99,19 @@ class LiteLLMRerankClient(RerankBase):
             sorted_results = sorted(results, key=lambda x: x.index)
             scores = [getattr(item, "relevance_score", 0.0) for item in sorted_results]
 
+            # Apply threshold filtering: set scores below threshold to 0
+            if self.threshold > 0.0:
+                filtered_scores = []
+                for score in scores:
+                    if score >= self.threshold:
+                        filtered_scores.append(score)
+                    else:
+                        filtered_scores.append(0.0)
+                        logger.debug(
+                            f"[LiteLLMRerankClient] Filtered score {score:.4f} below threshold {self.threshold}"
+                        )
+                scores = filtered_scores
+
             logger.debug(f"[LiteLLMRerankClient] Reranked {len(documents)} documents")
             return scores
 
@@ -121,4 +136,5 @@ class LiteLLMRerankClient(RerankBase):
             api_key=config.api_key,
             api_base=config.api_base,
             model_name=config.model,
+            threshold=config.threshold,
         )

@@ -37,6 +37,7 @@ class RerankClient(RerankBase):
         host: str = "api-vikingdb.vikingdb.cn-beijing.volces.com",
         model_name: str = "doubao-seed-rerank",
         model_version: str = "251028",
+        threshold: float = 0.0,
     ):
         """
         Initialize rerank client.
@@ -47,6 +48,7 @@ class RerankClient(RerankBase):
             host: VikingDB API host
             model_name: Rerank model name
             model_version: Rerank model version
+            threshold: Score threshold (0.0-1.0); results below this are filtered (default: 0.0)
         """
         super().__init__()
         self.ak = ak
@@ -55,6 +57,7 @@ class RerankClient(RerankBase):
         self.model_name = model_name
         self.model_version = model_version
         self.provider = "vikingdb"
+        self.threshold = threshold
 
     def _prepare_request(
         self,
@@ -150,6 +153,19 @@ class RerankClient(RerankBase):
                 return None
             scores = [item.get("score", 0.0) for item in data]
 
+            # Apply threshold filtering: set scores below threshold to 0
+            if self.threshold > 0.0:
+                filtered_scores = []
+                for score in scores:
+                    if score >= self.threshold:
+                        filtered_scores.append(score)
+                    else:
+                        filtered_scores.append(0.0)
+                        logger.debug(
+                            f"[RerankClient] Filtered score {score:.4f} below threshold {self.threshold}"
+                        )
+                scores = filtered_scores
+
             logger.debug(f"[RerankClient] Reranked {len(documents)} documents")
             return scores
 
@@ -199,4 +215,5 @@ class RerankClient(RerankBase):
             host=config.host,
             model_name=config.model_name,
             model_version=config.model_version,
+            threshold=config.threshold,
         )

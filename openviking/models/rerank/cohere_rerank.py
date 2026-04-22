@@ -27,12 +27,14 @@ class CohereRerankClient(RerankBase):
         api_key: str,
         model: str = "rerank-v3.5",
         api_base: str = "https://api.cohere.com",
+        threshold: float = 0.0,
     ):
         super().__init__()
         self.api_key = api_key
         self.model = model
         self.api_base = api_base.rstrip("/")
         self.provider = "cohere"
+        self.threshold = threshold
         self._client = httpx.Client(
             base_url=self.api_base,
             headers={
@@ -87,6 +89,19 @@ class CohereRerankClient(RerankBase):
                 idx = result["index"]
                 scores[idx] = result["relevance_score"]
 
+            # Apply threshold filtering: set scores below threshold to 0
+            if self.threshold > 0.0:
+                filtered_scores = []
+                for score in scores:
+                    if score >= self.threshold:
+                        filtered_scores.append(score)
+                    else:
+                        filtered_scores.append(0.0)
+                        logger.debug(
+                            f"[CohereRerank] Filtered score {score:.4f} below threshold {self.threshold}"
+                        )
+                scores = filtered_scores
+
             logger.debug(f"[CohereRerank] Reranked {len(documents)} documents")
             return scores
 
@@ -116,4 +131,5 @@ class CohereRerankClient(RerankBase):
         return cls(
             api_key=config.api_key,
             model=config.model_name if config.model_name != "doubao-seed-rerank" else "rerank-v3.5",
+            threshold=config.threshold,
         )

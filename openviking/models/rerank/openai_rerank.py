@@ -31,6 +31,7 @@ class OpenAIRerankClient(RerankBase):
         api_base: str,
         model_name: str,
         extra_headers: Optional[Dict[str, str]] = None,
+        threshold: float = 0.0,
     ) -> None:
         """
         Initialize OpenAI-compatible rerank client.
@@ -40,6 +41,7 @@ class OpenAIRerankClient(RerankBase):
             api_base: Full endpoint URL for the rerank API
             model_name: Model name to use for reranking
             extra_headers: Optional extra headers for API requests
+            threshold: Score threshold (0.0-1.0); results below this are filtered (default: 0.0)
         """
         super().__init__()
         self.api_key = api_key
@@ -47,6 +49,7 @@ class OpenAIRerankClient(RerankBase):
         self.model_name = model_name
         self.extra_headers = extra_headers or {}
         self.provider = "openai"
+        self.threshold = threshold
 
     def rerank_batch(self, query: str, documents: List[str]) -> Optional[List[float]]:
         """
@@ -114,6 +117,19 @@ class OpenAIRerankClient(RerankBase):
                     return None
                 scores[idx] = item.get("relevance_score", 0.0)
 
+            # Apply threshold filtering: set scores below threshold to 0
+            if self.threshold > 0.0:
+                filtered_scores = []
+                for score in scores:
+                    if score >= self.threshold:
+                        filtered_scores.append(score)
+                    else:
+                        filtered_scores.append(0.0)
+                        logger.debug(
+                            f"[OpenAIRerankClient] Filtered score {score:.4f} below threshold {self.threshold}"
+                        )
+                scores = filtered_scores
+
             logger.debug(f"[OpenAIRerankClient] Reranked {len(documents)} documents")
             return scores
 
@@ -139,4 +155,5 @@ class OpenAIRerankClient(RerankBase):
             api_base=config.api_base,
             model_name=config.model or "qwen3-rerank",
             extra_headers=config.extra_headers,
+            threshold=config.threshold,
         )
