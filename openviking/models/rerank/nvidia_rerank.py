@@ -88,13 +88,23 @@ class NvidiaRerankClient(RerankBase):
         if not documents:
             return []
 
+        # Filter out empty/whitespace-only documents (NVIDIA API requires at least 1 character)
+        # Track original indices for proper score mapping
+        valid_indices = [i for i, doc in enumerate(documents) if doc and doc.strip()]
+        filtered_docs = [documents[i] for i in valid_indices]
+
+        if not filtered_docs:
+            logger.debug("[NvidiaRerankClient] All documents are empty after filtering")
+            # Return zeros for all documents instead of None (graceful degradation)
+            return [0.0] * len(documents)
+
         # Format conversion: OpenViking -> NVIDIA
         # OpenViking: {query: str, documents: [str]}
         # NVIDIA: {query: {text}, passages: [{text}]}
         req_body = {
             "model": self.model_name,
             "query": {"text": query},
-            "passages": [{"text": doc} for doc in documents],
+            "passages": [{"text": doc} for doc in filtered_docs],
         }
 
         try:
@@ -126,26 +136,28 @@ class NvidiaRerankClient(RerankBase):
                 logger.warning(f"[NvidiaRerankClient] No rankings in response: {result}")
                 return None
 
-            if len(rankings) != len(documents):
+            if len(rankings) != len(filtered_docs):
                 logger.warning(
                     "[NvidiaRerankClient] Unexpected result length: expected=%s actual=%s",
-                    len(documents),
+                    len(filtered_docs),
                     len(rankings),
                 )
                 return None
 
             # Convert logit to score (0-1 range using sigmoid-like transformation)
             # NVIDIA logit can be negative, convert to bounded score
-            scores = [0.0] * len(documents)
+            scores = [0.0] * len(documents)  # Full size for original documents
+
             for item in rankings:
-                idx = item.get("index")
-                if idx is None or not (0 <= idx < len(documents)):
+                api_idx = item.get("index")
+                if api_idx is None or not (0 <= api_idx < len(filtered_docs)):
                     logger.warning(
                         "[NvidiaRerankClient] Out-of-bounds index in result: %s", item
                     )
                     return None
-                # Use logit directly as score (higher = more relevant)
-                scores[idx] = item.get("logit", 0.0)
+                # Map API's filtered index back to original document index
+                original_idx = valid_indices[api_idx]
+                scores[original_idx] = item.get("logit", 0.0)
 
             # Apply threshold filtering: set scores below threshold to 0
             if self.threshold > 0.0:
@@ -163,6 +175,11 @@ class NvidiaRerankClient(RerankBase):
             logger.debug(f"[NvidiaRerankClient] Reranked {len(documents)} documents")
             return scores
 
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"[NvidiaRerankClient] HTTP error: {e}, response: {getattr(e, 'response', None)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"[NvidiaRerankClient] Response text: {e.response.text}")
+            return None
         except Exception as e:
             logger.error(f"[NvidiaRerankClient] Rerank failed: {e}")
             return None
