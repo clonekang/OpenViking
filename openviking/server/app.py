@@ -12,7 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from openviking.server.api_keys import APIKeyManager
-from openviking.server.config import ServerConfig, load_server_config, validate_server_config
+from openviking.server.config import (
+    ServerConfig,
+    load_bot_gateway_token,
+    load_server_config,
+    validate_server_config,
+)
 from openviking.server.dependencies import set_service
 from openviking.server.error_mapping import map_exception
 from openviking.server.identity import AuthMode
@@ -76,11 +81,7 @@ def create_app(
 
         # Initialize APIKeyManager after service (needs VikingFS)
         effective_auth_mode = config.get_effective_auth_mode()
-        if (
-            effective_auth_mode == AuthMode.API_KEY
-            and config.root_api_key
-            and config.root_api_key != ""
-        ):
+        if config.root_api_key and config.root_api_key != "":
             api_key_manager = APIKeyManager(
                 root_key=config.root_api_key,
                 viking_fs=service.viking_fs,
@@ -236,6 +237,7 @@ def create_app(
         import openviking.server.routers.bot as bot_module
 
         bot_module.set_bot_api_url(config.bot_api_url)
+        bot_module.set_bot_api_key(load_bot_gateway_token())
         logger.info(f"Bot API proxy enabled, forwarding to {config.bot_api_url}")
     else:
         logger.info("Bot API proxy disabled (use --with-bot to enable)")

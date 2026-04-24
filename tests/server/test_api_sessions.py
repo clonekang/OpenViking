@@ -17,7 +17,6 @@ from openviking.server.api_keys import APIKeyManager
 from openviking.server.config import ServerConfig
 from openviking.server.identity import RequestContext, Role
 from openviking.server.routers import sessions as sessions_router
-from openviking_cli.exceptions import InvalidArgumentError
 from openviking_cli.session.user_id import UserIdentifier
 from openviking_cli.utils.config import OPENVIKING_CONFIG_ENV
 from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
@@ -308,20 +307,25 @@ async def test_add_message_admin_request_allows_registered_user_role_id(service,
     assert session.messages[-1].role_id == "alice"
 
 
-async def test_add_message_user_request_rejects_explicit_role_id(service, monkeypatch):
+async def test_add_message_user_request_allows_explicit_role_id(service, monkeypatch):
+    session_id = "user-explicit-role-id"
     ctx = RequestContext(
         user=UserIdentifier("acct_session_user", "alice", "assistant-user"),
         role=Role.USER,
     )
 
-    with pytest.raises(InvalidArgumentError, match="cannot explicitly set role_id"):
-        await _call_add_message_route(
-            service,
-            monkeypatch,
-            ctx=ctx,
-            payload=_message_request("user", content="hello user", role_id="alice"),
-            session_id="user-explicit-role-id",
-        )
+    response = await _call_add_message_route(
+        service,
+        monkeypatch,
+        ctx=ctx,
+        payload=_message_request("user", content="hello user", role_id="wx/user-01@abc"),
+        session_id=session_id,
+    )
+
+    assert response.result["message_count"] == 1
+    session = await service.sessions.get(session_id, ctx, auto_create=False)
+    await session.load()
+    assert session.messages[-1].role_id == "wx/user-01@abc"
 
 
 async def test_add_message_user_request_autofills_role_id(service, monkeypatch):
@@ -430,6 +434,42 @@ async def test_add_message_persistence_regression(client: httpx.AsyncClient, ser
     assert len(session.messages) == 2
     assert session.messages[0].content == "Message A"
     assert session.messages[1].content == "Message B"
+
+
+async def test_get_session_pending_tokens_counts_tool_only_messages(
+    client: httpx.AsyncClient, service
+):
+    create_resp = await client.post("/api/v1/sessions", json={})
+    session_id = create_resp.json()["result"]["session_id"]
+    tool_output = "x" * 120
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session_id}/messages",
+        json=_message_request(
+            "user",
+            parts=[
+                {
+                    "type": "tool",
+                    "tool_id": "call-1",
+                    "tool_name": "shell",
+                    "tool_output": tool_output,
+                    "tool_status": "completed",
+                }
+            ],
+        ),
+    )
+    assert resp.status_code == 200
+
+    ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.ROOT)
+    session = service.sessions.session(ctx, session_id)
+    await session.load()
+    expected_tokens = session.messages[0].estimated_tokens
+    assert expected_tokens > 0
+    assert session.messages[0].content == ""
+
+    get_resp = await client.get(f"/api/v1/sessions/{session_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["result"]["pending_tokens"] == expected_tokens
 
 
 async def test_delete_session(client: httpx.AsyncClient):
